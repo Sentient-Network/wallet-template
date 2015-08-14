@@ -1,5 +1,7 @@
 package wallettemplate;
 
+import com.netki.WalletNameResolver;
+import com.netki.exceptions.WalletNameLookupException;
 import javafx.scene.layout.HBox;
 import org.bitcoinj.core.*;
 import com.google.common.util.concurrent.FutureCallback;
@@ -8,6 +10,7 @@ import javafx.event.ActionEvent;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import org.bitcoinj.uri.BitcoinURI;
 import org.spongycastle.crypto.params.KeyParameter;
 import wallettemplate.controls.BitcoinAddressValidator;
 import wallettemplate.utils.TextFieldValidator;
@@ -28,6 +31,7 @@ public class SendMoneyController {
 
     private Wallet.SendResult sendResult;
     private KeyParameter aesKey;
+    private WalletNameResolver walletNameResolver;
 
     // Called by FXMLLoader
     public void initialize() {
@@ -37,6 +41,7 @@ public class SendMoneyController {
         new TextFieldValidator(amountEdit, text ->
                 !WTUtils.didThrow(() -> checkState(Coin.parseCoin(text).compareTo(balance) <= 0)));
         amountEdit.setText(balance.toPlainString());
+        walletNameResolver = new WalletNameResolver();
     }
 
     public void cancel(ActionEvent event) {
@@ -46,8 +51,20 @@ public class SendMoneyController {
     public void send(ActionEvent event) {
         // Address exception cannot happen as we validated it beforehand.
         try {
+            Address destination;
             Coin amount = Coin.parseCoin(amountEdit.getText());
-            Address destination = new Address(Main.params, address.getText());
+
+            try {
+                destination = new Address(Main.params, address.getText());
+            } catch (AddressFormatException e) {
+                // This is a WalletName
+                try {
+                    BitcoinURI bitcoinURI = this.walletNameResolver.resolve(address.getText(), "btc", false);
+                    destination = bitcoinURI.getAddress();
+                } catch (WalletNameLookupException e1) {
+                    throw new RuntimeException(e1);
+                }
+            }
             Wallet.SendRequest req;
             if (amount.equals(Main.bitcoin.wallet().getBalance()))
                 req = Wallet.SendRequest.emptyWallet(destination);
@@ -83,9 +100,6 @@ public class SendMoneyController {
             overlayUI.done();
         } catch (ECKey.KeyIsEncryptedException e) {
             askForPasswordAndRetry();
-        } catch (AddressFormatException e) {
-            // Cannot happen because we already validated it when the text field changed.
-            throw new RuntimeException(e);
         }
     }
 
